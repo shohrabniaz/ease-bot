@@ -1,0 +1,126 @@
+name: "EASE-Bot: verified IaC fixes"
+description: >-
+  Scans Terraform and Kubernetes files changed in a pull request (Checkov + Trivy), asks an LLM for a fix,
+  and posts it as GitHub suggested changes only if the fix still validates, keeps every resource,
+  adds no new findings and removes at least one.
+author: "Shohrab Hossen Niaz"
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  groq-api-key:
+    description: "Groq API key (free tier works). Pass it from a secret."
+    required: false
+    default: ""
+  github-token:
+    description: "Token used to read the PR and post comments. Needs pull-requests: write."
+    required: false
+    default: ${{ github.token }}
+  llm:
+    description: "groq | openai-compatible | mock"
+    required: false
+    default: "groq"
+  model:
+    description: "Model id"
+    required: false
+    default: "openai/gpt-oss-120b"
+  scanners:
+    description: "Comma list: checkov,trivy"
+    required: false
+    default: "checkov,trivy"
+  max-rounds:
+    description: "Repair rounds per file (each round re-scans and re-validates)"
+    required: false
+    default: "3"
+  max-files:
+    description: "Maximum IaC files to check per PR"
+    required: false
+    default: "10"
+  defer-checks:
+    description: "Rule ids to report but not auto-fix: 'default', 'none' or a comma list"
+    required: false
+    default: "default"
+  tool-validate:
+    description: "Run terraform validate and kubeconform -strict on every candidate fix"
+    required: false
+    default: "true"
+  fail-on:
+    description: "none | rejected | findings"
+    required: false
+    default: "none"
+
+outputs:
+  verified:
+    description: "Number of files with a verified fix"
+    value: ${{ steps.run.outputs.verified }}
+  partial:
+    description: "Number of files with a partial fix"
+    value: ${{ steps.run.outputs.partial }}
+  rejected:
+    description: "Number of files where every candidate fix was rejected"
+    value: ${{ steps.run.outputs.rejected }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install EASE-Bot and Checkov
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: python -m pip install --quiet --disable-pip-version-check "$ACTION_PATH" "checkov>=3.2,<4"
+
+    - uses: hashicorp/setup-terraform@v3
+      if: inputs.tool-validate == 'true'
+      with:
+        terraform_version: "1.9.8"
+        terraform_wrapper: false
+
+    - name: Install Trivy and kubeconform (pinned, checksum-verified)
+      shell: bash
+      env:
+        SCANNERS: ${{ inputs.scanners }}
+        TOOL_VALIDATE: ${{ inputs.tool-validate }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/easebot-bin"
+        cd "$RUNNER_TEMP"
+        if [[ ",$SCANNERS," == *",trivy,"* ]]; then
+          curl -sSfLo trivy.tgz https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz
+          echo "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf  trivy.tgz" | sha256sum -c -
+          tar xzf trivy.tgz -C easebot-bin trivy
+        fi
+        if [[ "$TOOL_VALIDATE" == "true" ]]; then
+          curl -sSfLo kc.tgz https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kc.tgz" | sha256sum -c -
+          tar xzf kc.tgz -C easebot-bin kubeconform
+        fi
+        echo "$RUNNER_TEMP/easebot-bin" >> "$GITHUB_PATH"
+
+    - name: Scan, repair and verify
+      id: run
+      shell: bash
+      env:
+        # Inputs go through env vars, never straight into the script (avoids injection).
+        GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        EASEBOT_API_KEY: ${{ inputs.groq-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        IN_LLM: ${{ inputs.llm }}
+        IN_MODEL: ${{ inputs.model }}
+        IN_SCANNERS: ${{ inputs.scanners }}
+        IN_ROUNDS: ${{ inputs.max-rounds }}
+        IN_FILES: ${{ inputs.max-files }}
+        IN_DEFER: ${{ inputs.defer-checks }}
+        IN_FAIL: ${{ inputs.fail-on }}
+        IN_TOOLS: ${{ inputs.tool-validate }}
+      run: |
+        set -euo pipefail
+        extra=()
+        [[ "$IN_TOOLS" == "true" ]] || extra+=(--no-tool-validate)
+        python -m easebot pr --llm "$IN_LLM" --model "$IN_MODEL" --scanners "$IN_SCANNERS" \
+          --max-rounds "$IN_ROUNDS" --max-files "$IN_FILES" --defer-checks "$IN_DEFER" \
+          --fail-on "$IN_FAIL" --json "$RUNNER_TEMP/easebot-report.json" "${extra[@]}"
