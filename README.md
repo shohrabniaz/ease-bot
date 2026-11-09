@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: shohrabniaz/ease-bot@v0.1.1
+      - uses: shohrabniaz/ease-bot@v0.1.2
         with:
           groq-api-key: ${{ secrets.GROQ_API_KEY }}
 ```

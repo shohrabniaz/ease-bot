@@ -20,6 +20,14 @@ def test_report_has_marker_verdicts_and_no_secret(monkeypatch):
     assert json.dumps(report.to_json([r]))
 
 
+def test_report_flags_model_claims_the_rescan_contradicts():
+    r = FileResult(path="a.tf", kind="terraform", verdict="partial", reason="", before=[F("R1"), F("R2")],
+                   after=[F("R2")], fixed=["R1"], original="a\n", fixed_file="b\n",
+                   notes=[{"rule_id": "R1", "change": "x"}, {"rule_id": "R2", "change": "y"}])
+    md = report.summary_markdown([r], "m", ["checkov"])
+    assert md.count("re-scan still reports it") == 1 and "- R2: y ⚠️" in md
+
+
 def test_report_when_no_iac_files():
     assert "No Terraform or Kubernetes files changed" in report.summary_markdown([], "m", ["checkov"])
 

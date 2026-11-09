@@ -55,7 +55,10 @@ def summary_markdown(results: list[FileResult], model: str, scanners: list[str],
                 lines += [f"- {a}" for a in r.attempts]
             if r.notes:
                 lines.append("\n**What the model changed**\n")
-                lines += [f"- {n.get('rule_id', '')}: {n.get('change', '')}" for n in r.notes[:12]]
+                still_open = {f.rule_id for f in (r.after or [])}
+                lines += [f"- {n.get('rule_id', '')}: {n.get('change', '')}"
+                          + (" ⚠️ *the model says this is fixed, but the re-scan still reports it*"
+                             if n.get("rule_id") in still_open else "") for n in r.notes[:15]]
             if r.fixed_file:
                 n = posted.get(r.path, 0)
                 if n:
