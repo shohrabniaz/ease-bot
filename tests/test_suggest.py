@@ -57,3 +57,32 @@ def test_split_postable_requires_whole_range_in_one_hunk():
 def test_unified_diff():
     d = unified("a\n", "b\n", "x.tf")
     assert "--- a/x.tf" in d and "-a" in d and "+b" in d
+
+
+def _apply(original, sugs):
+    lines = original.splitlines()
+    for s in sorted(sugs, key=lambda x: x.start, reverse=True):
+        lines[s.start - 1:s.end] = s.replacement
+    return "\n".join(lines) + "\n"
+
+
+def test_applying_every_suggestion_reproduces_the_fixed_file():
+    import pathlib
+    import random
+    rnd = random.Random(7)
+    for path in pathlib.Path("demo").rglob("*.*"):
+        orig = path.read_text()
+        lines = orig.splitlines()
+        for _ in range(25):
+            mutated = list(lines)
+            for _ in range(rnd.randint(1, 4)):
+                i = rnd.randrange(len(mutated))
+                op = rnd.choice(["edit", "insert", "delete"])
+                if op == "edit":
+                    mutated[i] = mutated[i] + "  # changed"
+                elif op == "insert":
+                    mutated.insert(i, "  added = true")
+                elif len(mutated) > 1:
+                    del mutated[i]
+            fixed = "\n".join(mutated) + "\n"
+            assert _apply(orig, suggestions(orig, fixed)) == fixed
