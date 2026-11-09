@@ -20,6 +20,7 @@ from .report import MARKER, summary_markdown, to_json
 from .scanners import available_scanners, detect_kind
 from .suggest import split_postable, suggestions
 
+INLINE_TAG = "**EASE-Bot**"
 VERDICT_ORDER = ["clean", "skipped", "verified", "partial", "error", "rejected"]
 
 
@@ -161,7 +162,11 @@ def cmd_pr(args) -> int:
         targets = targets[: args.max_files]
 
     results, posted = [], {}
-    existing = {(c.get("path"), c.get("line"), c.get("body")) for c in gh.review_comments(number)}
+    # Our own earlier inline suggestions (from a previous push) are replaced, not duplicated.
+    old = [c for c in gh.review_comments(number) if (c.get("body") or "").startswith(INLINE_TAG)
+           and (c.get("user") or {}).get("type") == "Bot"]
+    existing = {(c.get("path"), c.get("line"), c.get("body")) for c in old}
+    keep = set()
     review_comments = []
     for f, kind, content in targets:
         name = f["filename"]
@@ -176,11 +181,15 @@ def cmd_pr(args) -> int:
         if r.fixed_file and r.verdict in ("verified", "partial"):
             postable, _ = split_postable(suggestions(content, r.fixed_file), f.get("patch"))
             label = "✅ verified" if r.verdict == "verified" else "🟡 partial"
-            fixes = ", ".join(f"`{x}`" for x in r.fixed) or "n/a"
-            for s in postable:
-                body = (f"**EASE-Bot** ({label}): part of the checked fix for this file (fixes {fixes}).\n\n"
-                        f"{s.body()}")
+            n = len(postable)
+            for i, s in enumerate(postable, 1):
+                body = (f"{INLINE_TAG} ({label}, part {i} of {n}): this file's fix removes {len(r.fixed)} "
+                        f"finding(s) and passed re-scan and validation. "
+                        + ("Apply all parts together (*Add suggestion to batch*). " if n > 1 else "")
+                        + f"Details in the summary comment.\n\n{s.body()}")
                 if (name, s.end, body) in existing:
+                    keep.add((name, s.end, body))
+                    posted[name] = posted.get(name, 0) + 1
                     continue
                 c = {"path": name, "line": s.end, "side": "RIGHT", "body": body}
                 if s.start != s.end:
@@ -188,6 +197,12 @@ def cmd_pr(args) -> int:
                 review_comments.append(c)
                 posted[name] = posted.get(name, 0) + 1
 
+    for c in old:
+        if (c.get("path"), c.get("line"), c.get("body")) not in keep:
+            try:
+                gh.delete_review_comment(c["id"])
+            except Exception as e:
+                log(f"warning: could not remove an old suggestion: {e}")
     md = summary_markdown(results, model, scanners, posted, skipped_note)
     if review_comments:
         try:

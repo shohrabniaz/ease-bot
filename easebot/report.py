@@ -27,7 +27,10 @@ def summary_markdown(results: list[FileResult], model: str, scanners: list[str],
                   "|---|---|---|---|---|---|"]
         for r in results:
             after = "–" if r.after is None else str(len(r.after))
-            newpr = ", ".join(r.introduced_by_pr) if r.introduced_by_pr else "–"
+            n_new = len(r.introduced_by_pr)
+            newpr = "–" if not n_new else ("all" if n_new == len({f.rule_id for f in r.before}) else
+                                           ", ".join(f"`{x}`" for x in r.introduced_by_pr[:6]) +
+                                           (f" +{n_new - 6}" if n_new > 6 else ""))
             lines.append(f"| `{r.path}` | {ICON.get(r.verdict, '')} {r.verdict} | {len(r.before)} → {after} | "
                          f"{len(r.deferred)} | {newpr} | {r.reason.replace('|', '/')} |")
         lines.append("")
@@ -39,7 +42,8 @@ def summary_markdown(results: list[FileResult], model: str, scanners: list[str],
             fixed = set(r.fixed)
             for f in r.before:
                 mark = "✔ fixed" if f.rule_id in fixed else "open"
-                lines.append(f"- `{f.rule_id}` ({f.scanner}) {f.title}, resource `{f.resource or 'n/a'}`: {mark}")
+                tag = " 🆕" if f.rule_id in r.introduced_by_pr and len(r.introduced_by_pr) < len(r.before) else ""
+                lines.append(f"- `{f.rule_id}` ({f.scanner}) {f.title}, resource `{f.resource or 'n/a'}`: {mark}{tag}")
             if r.deferred:
                 lines.append("\n**Needs a human decision (reported, not auto-fixed)**\n")
                 lines += [f"- `{f.rule_id}` ({f.scanner}) {f.title}" for f in r.deferred]
@@ -55,7 +59,8 @@ def summary_markdown(results: list[FileResult], model: str, scanners: list[str],
             if r.fixed_file:
                 n = posted.get(r.path, 0)
                 if n:
-                    lines.append(f"\n{n} inline suggestion(s) posted on the diff: click **Commit suggestion** to apply.")
+                    lines.append(f"\n{n} inline suggestion(s) posted on the diff. To apply, use **Add suggestion to batch** "
+                                 "on each part, then **Commit suggestions**.")
                 lines.append("\n**Full patch**\n\n```diff\n" + unified(r.original, r.fixed_file, r.path) + "```")
             lines.append("\n</details>\n")
     lines += ["---",

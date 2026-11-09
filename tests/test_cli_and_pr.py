@@ -27,8 +27,10 @@ def test_report_when_no_iac_files():
 class FakeGitHub:
     instances = []
 
+    old_comments = []
+
     def __init__(self, repo, token):
-        self.reviews, self.comments = [], []
+        self.reviews, self.comments, self.deleted = [], [], []
         FakeGitHub.instances.append(self)
 
     def pr_files(self, number):
@@ -40,7 +42,10 @@ class FakeGitHub:
         return HEAD if ref == "headsha" else None
 
     def review_comments(self, number):
-        return []
+        return FakeGitHub.old_comments
+
+    def delete_review_comment(self, cid):
+        self.deleted.append(cid)
 
     def create_review(self, number, commit_id, body, comments):
         self.reviews.append((commit_id, comments))
@@ -53,7 +58,7 @@ class FakeGitHub:
 HEAD = "apiVersion: v1\nkind: Pod\nmetadata:\n  name: web\nspec:\n  hostNetwork: true\n"
 
 
-def test_pr_flow_posts_suggestion_and_summary(tmp_path, monkeypatch):
+def _pr_flow(tmp_path, monkeypatch, expect_deleted=()):
     import easebot.github as ghmod
     from conftest import FakeScanner
 
@@ -79,8 +84,25 @@ def test_pr_flow_posts_suggestion_and_summary(tmp_path, monkeypatch):
     assert commit == "headsha" and comments[0]["path"] == "k8s/pod.yaml" and comments[0]["line"] == 6
     assert "```suggestion\n  hostNetwork: false\n```" in comments[0]["body"]
     assert "✅ verified" in gh.comments[0] and SECRET not in gh.comments[0]
+    assert "| all |" in gh.comments[0]  # every finding is new because the file was added
     assert "verified=1" in (tmp_path / "out.txt").read_text()
     assert report.MARKER not in (tmp_path / "sum.md").read_text()
+    assert gh.deleted == list(expect_deleted)
+
+
+def test_pr_flow_posts_suggestion_and_summary(tmp_path, monkeypatch):
+    _pr_flow(tmp_path, monkeypatch)
+
+
+def test_pr_rerun_replaces_old_bot_suggestions(tmp_path, monkeypatch):
+    FakeGitHub.old_comments = [
+        {"id": 1, "path": "k8s/pod.yaml", "line": 3, "body": "**EASE-Bot** stale", "user": {"type": "Bot"}},
+        {"id": 2, "path": "k8s/pod.yaml", "line": 3, "body": "**EASE-Bot** by a human", "user": {"type": "User"}},
+    ]
+    try:
+        _pr_flow(tmp_path, monkeypatch, expect_deleted=[1])
+    finally:
+        FakeGitHub.old_comments = []
 
 
 @pytest.mark.integration

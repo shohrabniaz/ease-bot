@@ -21,7 +21,7 @@ EASE-Bot is a GitHub Action. When a pull request changes `.tf` or Kubernetes `.y
 ## Live demo
 
 - Demo repository: https://github.com/shohrabniaz/ease-bot-demo
-- Demo pull request with the bot's real comments: _see the demo repo's pull requests_
+- Demo pull request with the bot's real suggestions and summary: https://github.com/shohrabniaz/ease-bot-demo/pull/1
 
 ## Quick start (GitHub Actions)
 
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - uses: shohrabniaz/ease-bot@v0.1.0
+      - uses: shohrabniaz/ease-bot@v0.1.1
         with:
           groq-api-key: ${{ secrets.GROQ_API_KEY }}
 ```

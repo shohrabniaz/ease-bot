@@ -43,6 +43,11 @@ class GitHub:
     def review_comments(self, number: int) -> list[dict]:
         return self._get_all(f"/pulls/{number}/comments")
 
+    def delete_review_comment(self, comment_id: int) -> None:
+        r = self.s.delete(self._url(f"/pulls/comments/{comment_id}"), timeout=60)
+        if r.status_code not in (204, 404):
+            r.raise_for_status()
+
     def create_review(self, number: int, commit_id: str, body: str, comments: list[dict]) -> dict:
         r = self.s.post(self._url(f"/pulls/{number}/reviews"), timeout=60,
                         json={"commit_id": commit_id, "body": body, "event": "COMMENT", "comments": comments})
