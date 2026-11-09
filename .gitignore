@@ -5,3 +5,5 @@ __pycache__/
 .terraform/
 *.pyc
 build/
+submission.md
+VIDEO_SCRIPT.md
